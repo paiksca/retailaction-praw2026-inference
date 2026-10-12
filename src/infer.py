@@ -21,25 +21,17 @@ EKEYS = ("E", "EM")
 
 
 def embed_samples(recs, dino_dir, dino_weights, threads):
-    """Hand-crop DINOv2 embeddings per sample, (32, 4*384) float16 plus a (32, 4) mask, as in training.
-    Runs in float64 so results do not depend on the CPU architecture or thread count."""
-    from handcrops import MEAN, RES, STD, crops_for
+    """Hand-crop DINOv2 embeddings per sample: (32, 4*384) float16 plus a (32, 4) mask, as in training.
+    crops_det gives the same pixels on any CPU, and the network runs in float64, so results do not depend
+    on the CPU architecture or the thread count."""
+    import crops_det
     torch.set_num_threads(threads)
-    m = torch.hub.load(dino_dir, "dinov2_vits14", source="local", pretrained=False)
-    m.load_state_dict(torch.load(dino_weights, map_location="cpu")); m.eval().double()
-    mean = torch.tensor(MEAN, dtype=torch.float64); std = torch.tensor(STD, dtype=torch.float64)
+    m = crops_det.load_dino(dino_dir, dino_weights, torch.float64)
     Es, Ms = [], []
     for n, rec in enumerate(recs):
-        cr, ok = crops_for(rec, "")
-        E = np.zeros((32 * 4, 384), np.float16)
-        idx = np.nonzero(ok.reshape(-1))[0]
-        if len(idx):
-            x = torch.from_numpy(cr.reshape(-1, RES, RES, 3)[idx]).double().div(255)
-            x = ((x - mean) / std).permute(0, 3, 1, 2)
-            with torch.no_grad():
-                E[idx] = m(x).numpy().astype(np.float16)
-        Es.append(E.reshape(32, -1)); Ms.append(ok.reshape(32, -1))
-        if n % 250 == 0:
+        e, ok = crops_det.embed_rec(m, rec, torch.float64)
+        Es.append(e); Ms.append(ok)
+        if n % 100 == 0:
             print("embedded", n, len(recs), flush=True)
     return Es, Ms
 
